@@ -11,12 +11,21 @@
 // The basic greedy solution seems simple to me: Put the box in the lightest truck that has space
 // This will ensure that all truck weights increase at similar rate
 
+// I am currently just under 10
+// I have odd behaviour. I get worse scores typically when there's less boxes
+// I think I can explain this. When there's more boxes, there's a greater chance for a useful swap to occur, since there's more options.
+// Therefore, my path can extend a while longer before I shuffle and restart
+// Why do I restart completely? Instead of starting from scratch, why don't I look a random improving swap instead?
+// Out of the heaviest and lightest truck, see which has the bigger delta
+// Randomly search for a truck whose weight is on the other side of the target
+// Search for a good swap, repeat
+
 using namespace std;
 
 struct Box
 {
-	 float weight;
-	 float volume;
+	float weight;
+	float volume;
 	unsigned int ID;
 
 	Box(float weight, float volume, unsigned int ID)
@@ -31,7 +40,7 @@ struct Box
 class Truck
 {
 public:
-	
+
 	vector<Box*> boxes;
 	float totalWeight;
 	float totalVolume;
@@ -43,7 +52,7 @@ public:
 	{
 	}
 
-	void addBox(Box & box) 
+	void addBox(Box & box)
 	{
 		boxes.push_back(&box);
 		totalWeight += box.weight;
@@ -78,10 +87,57 @@ bool boxVolumeComp(Box* a, Box* b) { return a->volume < b->volume; }
 bool boxWeightComp(Box* a, Box* b) { return a->weight < b->weight; }
 bool boxSortDensity(const Box& a, const Box& b) { return a.weight / a.volume > b.weight / b.volume; }
 
+bool boxSwap(Truck& heavyTruck, Truck& lightTruck, vector<int> & solution)
+{
+	// Look for a simple 1-1 swap between heavy and light truck
+	int heavyIndex = -1;
+	int lightIndex = -1;
+	Box* heavyBox = nullptr;
+	Box* lightBox = nullptr;
+	float minDelta = heavyTruck.totalWeight - lightTruck.totalWeight;
+
+	for (unsigned int i = 0; i < heavyTruck.boxes.size(); i++)
+	{
+		heavyBox = heavyTruck.boxes[i];
+		for (unsigned int j = 0; j < lightTruck.boxes.size(); j++)
+		{
+			lightBox = lightTruck.boxes[j];
+
+			// Volumes need to work out, and score needs to improve
+			if (heavyTruck.totalVolume + lightBox->volume - heavyBox->volume > 100.0f || lightTruck.totalVolume - lightBox->volume + heavyBox->volume > 100.0f) { continue; }
+			float delta = abs((heavyTruck.totalWeight - heavyBox->weight + lightBox->weight) - (lightTruck.totalWeight + heavyBox->weight - lightBox->weight));
+
+			if (delta < minDelta)
+			{
+				minDelta = delta;
+				heavyIndex = i;
+				lightIndex = j;
+			}
+		}
+
+	}
+
+	if (heavyIndex != -1)
+	{
+		lightBox = lightTruck.boxes[lightIndex];
+		heavyBox = heavyTruck.boxes[heavyIndex];
+		solution[lightBox->ID] = heavyTruck.idx;
+		solution[heavyBox->ID] = lightTruck.idx;
+		heavyTruck.addBox(*lightBox);
+		lightTruck.addBox(*heavyBox);
+		heavyTruck.removeBox(*heavyBox);
+		lightTruck.removeBox(*lightBox);
+
+		return true;
+	}
+
+	return false;
+}
+
 int main()
 {
 	srand(time(NULL));
-	
+
 	array<Truck, 100> trucks;
 	vector<Box> boxes;
 	for (unsigned int i = 0; i < 100; i++)
@@ -95,7 +151,7 @@ int main()
 	float totalBoxWeight = 0.0f;
 	float totalBoxVolume = 0.0f;
 
-    cin >> boxCount; cin.ignore();
+	cin >> boxCount; cin.ignore();
 	for (unsigned int i = 0; i < boxCount; i++)
 	{
 		float weight;
@@ -107,23 +163,23 @@ int main()
 
 		boxes.emplace_back(weight, volume, i);
 	}
-	
+
 	vector<int> bestSolution;
+	vector<int> solution(boxCount, -1);
 	float bestScore = 9999999.0f;
 	clock_t startTime = clock();
-	while ((clock() - startTime) / CLOCKS_PER_SEC < 40)
+	while ((clock() - startTime) / CLOCKS_PER_SEC < 48)
 	{
 		for (unsigned int i = 0; i < 100; i++)
 		{
 			trucks[i].emptyBoxes();
 		}
 
-		vector<int> solution(boxCount, -1);
 		random_shuffle(boxes.begin(), boxes.end());
 
 		for (auto& box : boxes)
 		{
-			// Find the truck with the lowest weight (randomly second lowest), and that has space
+			// Find the truck with the lowest weight and that has space
 			minWeight = 9999999.0f;
 			truckIndex = -1;
 			for (unsigned int i = 0; i < trucks.size(); i++)
@@ -172,16 +228,14 @@ int main()
 
 		while ((clock() - startTime) / CLOCKS_PER_SEC < 40)
 		{
-			/*if ((clock() - startTime) / CLOCKS_PER_SEC > 10)
-			{
-			int stop = 0;
-			}*/
-
 			Truck& heaviestTruck = *max_element(trucks.begin(), trucks.end(), truckWeightComp);
-			Box* smallestBox = *min_element(heaviestTruck.boxes.begin(), heaviestTruck.boxes.end(), boxVolumeComp);
+			Truck& lightestTruck = *min_element(trucks.begin(), trucks.end(), truckWeightComp);
+
+			//Box* smallestBox = *min_element(heaviestTruck.boxes.begin(), heaviestTruck.boxes.end(), boxVolumeComp);
 
 			// Find the truck with the lowest weight and that has space
-			minWeight = 9999999.0f;
+			// Make sure it actually improves things
+			/*minWeight = heaviestTruck.totalWeight - smallestBox->weight;
 			truckIndex = -1;
 			for (unsigned int i = 0; i < trucks.size(); i++)
 			{
@@ -193,75 +247,109 @@ int main()
 				}
 			}
 
-			// Make sure it actually improves things
-			if (truckIndex != -1 && trucks[truckIndex].totalWeight + smallestBox->weight < heaviestTruck.totalWeight)
+
+			if (truckIndex != -1)
 			{
 				solution[smallestBox->ID] = truckIndex;
 				trucks[truckIndex].addBox(*smallestBox);
 				heaviestTruck.removeBox(*smallestBox);
-			}
-			else
+
+				continue;
+			}*/
+
+
+			// When I get here, I typically have the lightest truck with plenty of room, which is good!
+			// However, the smallest box in the heaviest truck is so heavy that I shouldn't move it
+			// Pick an optimal box from this truck to move instead
+			float minDelta = heaviestTruck.totalWeight - lightestTruck.totalWeight;
+			int boxIndex = -1;
+			Box* box;
+			for (unsigned int i = 0; i < heaviestTruck.boxes.size(); i++)
 			{
-				// find the lightest box in the lightest truck
-				// put it in the lightest truck with room
-				Truck& lightestTruck = *min_element(trucks.begin(), trucks.end(), truckWeightComp);
-				Box* lightestBox = *min_element(lightestTruck.boxes.begin(), lightestTruck.boxes.end(), boxWeightComp);
-
-				// Find the truck with the lowest weight and that has space
-				minWeight = 9999999.0f;
-				truckIndex = -1;
-				for (unsigned int i = 0; i < trucks.size(); i++)
+				box = heaviestTruck.boxes[i];
+				if (lightestTruck.totalVolume + box->volume > 100.0f) { continue; }
+				float delta = abs(heaviestTruck.totalWeight - box->weight - (lightestTruck.totalWeight + box->weight));
+				if (delta < minDelta)
 				{
-					if (i == lightestTruck.idx) { continue; }
-					Truck& truck = trucks[i];
-					if (truck.totalWeight < minWeight && lightestBox->volume < (100.0f - truck.totalVolume))
-					{
-						minWeight = truck.totalWeight;
-						truckIndex = i;
-					}
-				}
-
-				// If the receiving truck will now be the heaviest, I've probably saturated the usefulness
-				if (truckIndex != -1 && trucks[truckIndex].totalWeight + lightestBox->weight < heaviestTruck.totalWeight)
-				{
-					solution[lightestBox->ID] = truckIndex;
-					trucks[truckIndex].addBox(*lightestBox);
-					lightestTruck.removeBox(*lightestBox);
-				}
-				else
-				{
-					// When I get here, I typically have the lightest truck with plenty of room, which is good!
-					// However, the smallest box in the heaviest truck is so heavy that I shouldn't move it
-					// Pick an optimal box from this truck to move instead
-					float minDelta = abs(targetWeight - heaviestTruck.totalWeight) + abs(targetWeight - lightestTruck.totalWeight);
-					int boxIndex = -1;
-					Box* box;
-					for (unsigned int i = 0; i < heaviestTruck.boxes.size(); i++)
-					{
-						box = heaviestTruck.boxes[i];
-						float delta = abs(targetWeight - (heaviestTruck.totalWeight - box->weight)) + abs(targetWeight - (lightestTruck.totalWeight + box->weight));
-						if (delta < minDelta && box->volume < (100.0f - lightestTruck.totalVolume))
-						{
-							minDelta = delta;
-							boxIndex = i;
-						}
-					}
-
-					if (boxIndex != -1)
-					{
-						box = heaviestTruck.boxes[boxIndex];
-						solution[box->ID] = lightestTruck.idx;
-						lightestTruck.addBox(*box);
-						heaviestTruck.removeBox(*box);
-					}
-
-					else
-					{
-						break;
-					}
-
+					minDelta = delta;
+					boxIndex = i;
 				}
 			}
+
+			if (boxIndex != -1)
+			{
+				box = heaviestTruck.boxes[boxIndex];
+				solution[box->ID] = lightestTruck.idx;
+				lightestTruck.addBox(*box);
+				heaviestTruck.removeBox(*box);
+
+				continue;
+			}
+
+			// find the lightest box in the lightest truck
+			// put it in the lightest truck with room
+			Box* lightestBox = *min_element(lightestTruck.boxes.begin(), lightestTruck.boxes.end(), boxWeightComp);
+
+			// Find the truck with the lowest weight and that has space
+			// If the receiving truck will now be the heaviest, I've probably saturated the usefulness
+			minWeight = heaviestTruck.totalWeight - lightestBox->weight;
+			truckIndex = -1;
+			for (unsigned int i = 0; i < trucks.size(); i++)
+			{
+				if (i == lightestTruck.idx) { continue; }
+				Truck& truck = trucks[i];
+				if (truck.totalWeight < minWeight && lightestBox->volume < (100.0f - truck.totalVolume))
+				{
+					minWeight = truck.totalWeight;
+					truckIndex = i;
+				}
+			}
+
+			if (truckIndex != -1)
+			{
+				solution[lightestBox->ID] = truckIndex;
+				trucks[truckIndex].addBox(*lightestBox);
+				lightestTruck.removeBox(*lightestBox);
+
+				continue;
+			}
+
+			// Look for a simple 1-1 swap between heaviest and lightest truck
+			if (boxSwap(heaviestTruck, lightestTruck, solution)) { continue; }
+
+			// Then look for swaps with random trucks on the other side of the weight spectrum
+			bool found = false;
+
+			for (int i = 0; i < 100; i++)
+			{
+				truckIndex = i;
+				if (truckIndex == lightestTruck.idx) { continue; }
+				if (boxSwap(trucks[truckIndex], lightestTruck, solution))
+				{
+					found = true;
+					break;
+				}
+			}
+
+
+			if (found) { continue; }
+
+
+			for (int i = 0; i < 100; i++)
+			{
+				truckIndex = i;
+				if (truckIndex == heaviestTruck.idx) { continue; }
+				if (boxSwap(heaviestTruck, trucks[truckIndex], solution))
+				{
+					found = true;
+					break;
+				}
+			}
+
+
+			if (found) { continue; }
+
+			break;
 		}
 
 		Truck& heaviestTruck = *max_element(trucks.begin(), trucks.end(), truckWeightComp);
@@ -273,61 +361,6 @@ int main()
 			bestScore = score;
 		}
 	}
-	
-	
-	
-	// When I exit from the above, it will be because I don't have the space in the lighter trucks to put these boxes
-	// I want to remove a box from the lighest truck and put it "on the shelf" temporarily
-	// This means I can put other boxes inside
-	// I need to find somewhere else to put it though
-
-
-	//for (int i = 0; i < 10; i++)
-	//{
-	//	// Find the heaviest and lightest truck
-	//	Truck& lightestTruck = *min_element(trucks.begin(), trucks.end(), truckWeightComp);
-	//	// Testing something with volume
-	//	Truck& heaviestTruck = *min_element(trucks.begin(), trucks.end(), truckVolumeComp);
-
-	//	// Take out all the boxes from these two, and rearrange again
-	//	vector<Box*> combinedBoxes = heaviestTruck.boxes;
-	//	combinedBoxes.insert(combinedBoxes.end(), lightestTruck.boxes.begin(), lightestTruck.boxes.end());
-	//	heaviestTruck.emptyBoxes();
-	//	lightestTruck.emptyBoxes();
-
-	//	// For now it's simple, redo the greedy algorithm
-	//	for (auto box : combinedBoxes)
-	//	{
-	//		// Find the truck with the lowest weight, and that has space
-	//		truckIndex = -1;
-	//		minWeight = 9999999.0f;
-	//		if (lightestTruck.totalWeight < minWeight && box->volume < (100.0f - lightestTruck.totalVolume))
-	//		{
-	//			minWeight = lightestTruck.totalWeight;
-	//			truckIndex = lightestTruck.idx;
-	//		}
-
-	//		if (heaviestTruck.totalWeight < minWeight && box->volume < (100.0f - heaviestTruck.totalVolume))
-	//		{
-	//			minWeight = heaviestTruck.totalWeight;
-	//			truckIndex = heaviestTruck.idx;
-	//		}
-
-	//		if (truckIndex == -1) { break; }
-
-	//		// Add it to the solution, and update the truck
-	//		solution[box->ID] = truckIndex;
-	//		trucks[truckIndex].addBox(*box);
-	//	}
-
-	//	combinedBoxes.clear();
-	//}
-
-	// Print truck status
-	/*for (auto& truck : trucks)
-	{
-		cout << "Weight " << truck.totalWeight << " Volume " << truck.totalVolume << endl;
-	}*/
 
 	//Print solution
 	for (int& truck : bestSolution)
@@ -335,5 +368,5 @@ int main()
 		cout << truck << " ";
 	}
 	cout << endl;
- 
+
 }
